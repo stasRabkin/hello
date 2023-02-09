@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: acrstasdemo.azurecr.io
+        username: ${{ secrets.acr_acrstasdemo_username }}
+        password: ${{ secrets.acr_acrstasdemo_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/" -f  "Dockerfile" -t acrstasdemo.azurecr.io/aksstasdemo:${{ github.sha }} --label dockerfile-path=Dockerfile
+        docker push acrstasdemo.azurecr.io/aksstasdemo:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_aksstasdemo_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep aks-stasdemo879a | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace aks-stasdemo879a`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: aks-stasdemo879a
+        container-registry-url: acrstasdemo.azurecr.io
+        container-registry-username: ${{ secrets.acr_acrstasdemo_username }}
+        container-registry-password: ${{ secrets.acr_acrstasdemo_password }}
+        secret-name: aksstasdemodockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: aks-stasdemo879a
+        manifests: |
+          manifests/deployment-7.yml
+          manifests/service-7.yml
+        images: |
+          acrstasdemo.azurecr.io/aksstasdemo:${{ github.sha }}
+        imagepullsecrets: |
+          aksstasdemodockerauth
